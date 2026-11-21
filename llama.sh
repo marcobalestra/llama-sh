@@ -1,6 +1,6 @@
 #!/bin/bash
 
-THIS_SCRIPT_VERSION="v1.1"
+THIS_SCRIPT_VERSION="v1.2"
 THIS_SCRIPT_SOURCE="${BASH_SOURCE[0]}"
 while [[ -L "$THIS_SCRIPT_SOURCE" ]]; do
 	DIR="$(cd -P "$(dirname "$THIS_SCRIPT_SOURCE")" && pwd)"
@@ -12,6 +12,7 @@ MODELS_DIR="$AI_HOME_DIR/Models/llama.cpp"
 
 CONFIG="$AI_HOME_DIR/.llama"
 LLAMA_LOG="$AI_HOME_DIR/activity-llama.log"
+# Directory with per-model metadata: <filename.gguf>.url and <filename.gguf>.txt
 KNOWN_MODELS="$AI_HOME_DIR/.known.llama"
 
 PORT=8080
@@ -20,11 +21,171 @@ MODEL=""
 MODEL_ARGS=()
 MODEL_SUMMARY=""
 PID=""
+EDITOR_CMD=""
+
+# Lists with more entries than this ask for a filter first
+FILTER_THRESHOLD=10
+# Working set shared by the list/filter helpers
+CAND=()
+FILTER_USED=0
+FILTER_VALUE=""
+# Model chosen by choose_note_target()
+NOTE_TARGET=""
 
 check4command() {
 	if ! command -v "$1" >/dev/null 2>&1; then
 		return 1
 	fi
+	return 0
+}
+
+valid_model_name() {
+	[[ "$1" =~ ^[a-zA-Z0-9._-]+\.gguf$ ]] && [[ "$1" != .* ]]
+}
+
+url_file() {
+	printf '%s/%s.url' "$KNOWN_MODELS" "$1"
+}
+
+note_file() {
+	printf '%s/%s.txt' "$KNOWN_MODELS" "$1"
+}
+
+get_model_url() {
+	local file line=""
+	file=$(url_file "$1")
+	[[ -f "$file" ]] || return 0
+	IFS= read -r line < "$file" || true
+	printf '%s' "${line%$'\r'}"
+}
+
+# First line of the model notes, used as preview in lists
+get_model_comment() {
+	local file line=""
+	file=$(note_file "$1")
+	[[ -f "$file" ]] || return 0
+	IFS= read -r line < "$file" || true
+	printf '%s' "${line%$'\r'}"
+}
+
+# Preview for lists: first line of the notes, followed by [+n] when n more lines exist
+get_model_preview() {
+	local file line first="" extra=0 n=0
+	file=$(note_file "$1")
+	[[ -f "$file" ]] || return 0
+
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		line="${line%$'\r'}"
+		n=$((n + 1))
+		if [[ "$n" -eq 1 ]]; then
+			first="$line"
+		elif [[ -n "${line//[[:space:]]/}" ]]; then
+			extra=$((extra + 1))
+		fi
+	done < "$file"
+
+	if [[ "$extra" -gt 0 ]]; then
+		[[ -n "$first" ]] && first="$first "
+		first="$first[+$extra]"
+	fi
+	printf '%s' "$first"
+	return 0
+}
+
+set_model_url() {
+	printf '%s\n' "$2" > "$(url_file "$1")"
+}
+
+set_model_note() {
+	printf '%s\n' "$2" > "$(note_file "$1")"
+}
+
+append_model_note() {
+	local file
+	file=$(note_file "$1")
+	# Make sure the existing content ends with a newline
+	if [[ -s "$file" && -n "$(tail -c 1 "$file")" ]]; then
+		echo >> "$file"
+	fi
+	printf '%s\n' "$2" >> "$file"
+}
+
+seed_model() {
+	printf '%s\n' "$2" > "$(url_file "$1")"
+	printf '%s\n' "$3" > "$(note_file "$1")"
+}
+
+seed_known_models() {
+	seed_model "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf" "https://huggingface.co/bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF/resolve/main/DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf" "Capable model, but too heavy for 16GB RAM."
+	seed_model "gemma-4-12B-it-Q4_K_M.gguf" "https://huggingface.co/bartowski/gemma-4-12B-it-GGUF/resolve/main/gemma-4-12B-it-Q4_K_M.gguf" "Strong reasoning and self-correction, but too slow and heavy for M2 Pro / 16GB."
+	seed_model "granite-3.3-8b-instruct-Q4_K_M.gguf" "https://huggingface.co/ibm-granite/granite-3.3-8b-instruct-GGUF/resolve/main/granite-3.3-8b-instruct-Q4_K_M.gguf" "Unusable: claims it cannot write files, fails to complete tasks, and hallucinates incompatible code."
+	seed_model "LFM2.5-8B-A1B-Q4_K_M.gguf" "https://huggingface.co/LiquidAI/LFM2.5-8B-A1B-GGUF/resolve/main/LFM2.5-8B-A1B-Q4_K_M.gguf" "Rejected: very fast, but ignores tools and produces broken output."
+	seed_model "Mellum2-12B-A2.5B-Instruct-Q4_K_M.gguf" "https://huggingface.co/bartowski/Mellum2-12B-A2.5B-Instruct-GGUF/resolve/main/Mellum2-12B-A2.5B-Instruct-Q4_K_M.gguf" "Poor instruction following: runs basic ls searches and then hallucinates the rest."
+	seed_model "Ministral-3-8B-Instruct-2512-Q4_K_M.gguf" "https://huggingface.co/mistralai/Ministral-3-8B-Instruct-2512-GGUF/resolve/0102285ad796bd99af90f58de616092e5630e970/Ministral-3-8B-Instruct-2512-Q4_K_M.gguf" "Solid agentic behavior: good exploration, tool usage, coherent diffs, and constraint adherence. Near swap limit on 16GB."
+	seed_model "omnicoder-9b-q4_k_m.gguf" "https://huggingface.co/Tesslate/OmniCoder-9B-GGUF/resolve/main/omnicoder-9b-q4_k_m.gguf" "Promising analysis, but incomplete code generation and tends to stall on retries."
+	seed_model "OpenCoder-8B-Instruct-Q4_K_M.gguf" "https://huggingface.co/bartowski/OpenCoder-8B-Instruct-GGUF/resolve/main/OpenCoder-8B-Instruct-Q4_K_M.gguf" "Fails to execute tools, misunderstands prompts, and gets stuck in loops."
+	seed_model "Ornith-1.5-9B-Q4_K_M.gguf" "https://huggingface.co/ornith-ai/Ornith-1.5-9B-GGUF/resolve/main/Ornith-1.5-9B-Q4_K_M.gguf" "Excellent initial analysis, but stalls during tool-assisted code generation. Worth revisiting later."
+	seed_model "Phi-4-mini-instruct-Q4_K_M.gguf" "https://huggingface.co/lmstudio-community/Phi-4-mini-instruct-GGUF/resolve/main/Phi-4-mini-instruct-Q4_K_M.gguf" "Rejected: ignores instructions and requirements, invents architectures."
+	seed_model "Qwen3-8B-Q4_K_M.gguf" "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf" "Unreliable tool usage and inconsistent instruction following."
+	seed_model "Qwen_Qwen3.5-9B-Q4_K_M.gguf" "https://huggingface.co/bartowski/Qwen_Qwen3.5-9B-GGUF/resolve/a97475a16d55218110e20e5391d1fe46a8c5128f/Qwen_Qwen3.5-9B-Q4_K_M.gguf" "Fast and capable on isolated tasks, but tends to forget system/project rules on longer generations."
+}
+
+# One-time conversion of the v1.x TSV file (.known.llama) into the .known.llama/ directory.
+# The directory is built aside and swapped in only when complete, so an interrupted
+# migration leaves the old file untouched. The backup of the old file only exists while
+# the swap is in progress: it is deleted once the migration succeeds.
+migrate_known_models() {
+	local backup="$KNOWN_MODELS.bak"
+	local staging="$KNOWN_MODELS.migrating"
+	local line name rest url note count=0
+
+	[[ -e "$backup" ]] && backup="$KNOWN_MODELS.bak.$(date +%s)"
+
+	rm -rf "$staging"
+	if ! mkdir "$staging"; then
+		status_line "Error" "❌ Unable to create $staging"
+		return 1
+	fi
+
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		line="${line%$'\r'}"
+		[[ "$line" == *$'\t'* ]] || continue
+
+		name="${line%%$'\t'*}"
+		rest="${line#*$'\t'}"
+		url="${rest%%$'\t'*}"
+		note=""
+		if [[ "$rest" == *$'\t'* ]]; then
+			note="${rest#*$'\t'}"
+		fi
+
+		[[ -n "$name" && "$name" != */* && "$name" != .* ]] || continue
+
+		if [[ -n "$url" && "$url" != "-" ]]; then
+			printf '%s\n' "$url" > "$staging/$name.url"
+		fi
+		if [[ -n "$note" ]]; then
+			printf '%s\n' "$note" > "$staging/$name.txt"
+		fi
+		count=$((count + 1))
+	done < "$KNOWN_MODELS"
+
+	if ! mv "$KNOWN_MODELS" "$backup"; then
+		status_line "Error" "❌ Unable to back up $KNOWN_MODELS"
+		rm -rf "$staging"
+		return 1
+	fi
+	if ! mv "$staging" "$KNOWN_MODELS"; then
+		status_line "Error" "❌ Migration failed, restoring $KNOWN_MODELS"
+		mv "$backup" "$KNOWN_MODELS"
+		rm -rf "$staging"
+		return 1
+	fi
+
+	# Migration completed: the backup is no longer needed
+	rm -f "$backup"
+
+	status_line "Migrated" "📦 $count known models -> $(basename "$KNOWN_MODELS")/"
 	return 0
 }
 
@@ -69,21 +230,17 @@ check_setup() {
 	
 		status_line "Installed" "🪢 Pi Coding Agent was installed"
 	fi
-	if [[ ! -f "$KNOWN_MODELS" ]]; then
-		cat << 'PREDEFINED_MODELS' > "$KNOWN_MODELS"
-DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf	https://huggingface.co/bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF/resolve/main/DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf	Capable model, but too heavy for 16GB RAM.
-gemma-4-12B-it-Q4_K_M.gguf	https://huggingface.co/bartowski/gemma-4-12B-it-GGUF/resolve/main/gemma-4-12B-it-Q4_K_M.gguf	Strong reasoning and self-correction, but too slow and heavy for M2 Pro / 16GB.
-granite-3.3-8b-instruct-Q4_K_M.gguf	https://huggingface.co/ibm-granite/granite-3.3-8b-instruct-GGUF/resolve/main/granite-3.3-8b-instruct-Q4_K_M.gguf	Unusable: claims it cannot write files, fails to complete tasks, and hallucinates incompatible code.
-LFM2.5-8B-A1B-Q4_K_M.gguf	https://huggingface.co/LiquidAI/LFM2.5-8B-A1B-GGUF/resolve/main/LFM2.5-8B-A1B-Q4_K_M.gguf	Rejected: very fast, but ignores tools and produces broken output.
-Mellum2-12B-A2.5B-Instruct-Q4_K_M.gguf	https://huggingface.co/bartowski/Mellum2-12B-A2.5B-Instruct-GGUF/resolve/main/Mellum2-12B-A2.5B-Instruct-Q4_K_M.gguf	Poor instruction following: runs basic ls searches and then hallucinates the rest.
-Ministral-3-8B-Instruct-2512-Q4_K_M.gguf	https://huggingface.co/mistralai/Ministral-3-8B-Instruct-2512-GGUF/resolve/0102285ad796bd99af90f58de616092e5630e970/Ministral-3-8B-Instruct-2512-Q4_K_M.gguf	Solid agentic behavior: good exploration, tool usage, coherent diffs, and constraint adherence. Near swap limit on 16GB.
-omnicoder-9b-q4_k_m.gguf	https://huggingface.co/Tesslate/OmniCoder-9B-GGUF/resolve/main/omnicoder-9b-q4_k_m.gguf	Promising analysis, but incomplete code generation and tends to stall on retries.
-OpenCoder-8B-Instruct-Q4_K_M.gguf	https://huggingface.co/bartowski/OpenCoder-8B-Instruct-GGUF/resolve/main/OpenCoder-8B-Instruct-Q4_K_M.gguf	Fails to execute tools, misunderstands prompts, and gets stuck in loops.
-Ornith-1.5-9B-Q4_K_M.gguf	https://huggingface.co/ornith-ai/Ornith-1.5-9B-GGUF/resolve/main/Ornith-1.5-9B-Q4_K_M.gguf	Excellent initial analysis, but stalls during tool-assisted code generation. Worth revisiting later.
-Phi-4-mini-instruct-Q4_K_M.gguf	https://huggingface.co/lmstudio-community/Phi-4-mini-instruct-GGUF/resolve/main/Phi-4-mini-instruct-Q4_K_M.gguf	Rejected: ignores instructions and requirements, invents architectures.
-Qwen3-8B-Q4_K_M.gguf	https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf	Unreliable tool usage and inconsistent instruction following.
-Qwen_Qwen3.5-9B-Q4_K_M.gguf	https://huggingface.co/bartowski/Qwen_Qwen3.5-9B-GGUF/resolve/a97475a16d55218110e20e5391d1fe46a8c5128f/Qwen_Qwen3.5-9B-Q4_K_M.gguf	Fast and capable on isolated tasks, but tends to forget system/project rules on longer generations.
-PREDEFINED_MODELS
+
+	if [[ -f "$KNOWN_MODELS" ]]; then
+		migrate_known_models || return 1
+	elif [[ ! -d "$KNOWN_MODELS" ]]; then
+		if ! mkdir -p "$KNOWN_MODELS"; then
+			status_line "Error" "❌ Unable to create dir: $KNOWN_MODELS"
+			return 1
+		fi
+	fi
+	if [[ -z "$(ls -A "$KNOWN_MODELS" 2>/dev/null)" ]]; then
+		seed_known_models
 	fi
 	return 0
 }
@@ -105,6 +262,7 @@ load_config() {
 		PORT=$(sed -n '2p' "$CONFIG")
 		LOG_LEVEL=$(sed -n '3p' "$CONFIG")
 		PID=$(sed -n '4p' "$CONFIG")
+		EDITOR_CMD=$(sed -n '5p' "$CONFIG")
 	fi
 
 	[[ "$PORT" =~ ^[0-9]+$ ]] && [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || PORT=8080
@@ -119,7 +277,7 @@ load_config() {
 write_config() {
 	local tmp="$CONFIG.tmp.$$"
 
-	printf '%s\n%s\n%s\n%s\n' "$MODEL" "$PORT" "$LOG_LEVEL" "$PID" > "$tmp"
+	printf '%s\n%s\n%s\n%s\n%s\n' "$MODEL" "$PORT" "$LOG_LEVEL" "$PID" "$EDITOR_CMD" > "$tmp"
 	mv "$tmp" "$CONFIG"
 }
 
@@ -146,54 +304,144 @@ process_is_llama() {
 	esac
 }
 
-get_model_comment() {
-	local target_name="$1"
-	local line name rest
+# ---------------------------------------------------------------------------
+# Lists and filters
+# ---------------------------------------------------------------------------
 
-	[[ -f "$KNOWN_MODELS" ]] || return 0
+# Case-insensitive substring match of $1 against any of the remaining arguments.
+# nocasematch is enabled only here, and the previous state is restored.
+matches_filter() {
+	local filter="$1" hit=1 had=0 text
+	shift
 
-	while IFS= read -r line || [[ -n "$line" ]]; do
-		name="${line%%$'\t'*}"
-		[[ "$name" == "$target_name" && "$line" == *$'\t'* ]] || continue
-		rest="${line#*$'\t'}"
-		if [[ "$rest" == *$'\t'* ]]; then
-			echo "${rest#*$'\t'}"
+	shopt -q nocasematch && had=1
+	shopt -s nocasematch
+	for text in "$@"; do
+		if [[ "$text" == *"$filter"* ]]; then
+			hit=0
+			break
 		fi
-		return 0
-	done < "$KNOWN_MODELS"
+	done
+	[[ "$had" -eq 1 ]] || shopt -u nocasematch
+
+	return "$hit"
+}
+
+# Narrow CAND[] down by filter ($1), matched on name, URL and first line of the notes.
+# Without a filter, lists longer than FILTER_THRESHOLD ask for one (Enter = show all).
+narrow_candidates() {
+	local filter="$1"
+	local all=("${CAND[@]}")
+	local name
+
+	FILTER_USED=0
+	FILTER_VALUE=""
+
+	if [[ -z "$filter" && ${#all[@]} -gt $FILTER_THRESHOLD ]]; then
+		read -rp "${#all[@]} entries. Filter (Enter = show all): " filter || filter=""
+	fi
+	[[ -n "$filter" ]] || return 0
+
+	FILTER_USED=1
+	FILTER_VALUE="$filter"
+	CAND=()
+	for name in "${all[@]}"; do
+		if matches_filter "$filter" "$name" "$(get_model_url "$name")" "$(get_model_comment "$name")"; then
+			CAND+=("$name")
+		fi
+	done
+	return 0
+}
+
+# Names with a .url and/or .txt file in .known.llama/, in alphabetical order
+list_known_names() {
+	local f name
+
+	CAND=()
+	for f in "$KNOWN_MODELS"/*; do
+		case "$f" in
+			*.txt) [[ -f "${f%.txt}.url" ]] && continue ;;
+			*.url) ;;
+			*) continue ;;
+		esac
+		[[ -f "$f" ]] || continue
+		name="${f##*/}"
+		CAND+=("${name%.*}")
+	done
+}
+
+list_local_names() {
+	local f
+
+	CAND=()
+	for f in "$MODELS_DIR"/*.gguf; do
+		[[ -f "$f" ]] && CAND+=("${f##*/}")
+	done
+}
+
+# Known models plus local .gguf files that have no metadata yet
+list_note_targets() {
+	local f name
+
+	list_known_names
+	for f in "$MODELS_DIR"/*.gguf; do
+		[[ -f "$f" ]] || continue
+		name="${f##*/}"
+		[[ -e "$(url_file "$name")" || -e "$(note_file "$name")" ]] && continue
+		CAND+=("$name")
+	done
+}
+
+print_entry() {
+	local label="$1" name="$2" comment
+
+	status_line "$label" "$name"
+	comment=$(get_model_preview "$name")
+	[[ -n "$comment" ]] && printf '%19s %s\n' "" "ⓘ  $comment"
+	return 0
+}
+
+print_candidates() {
+	local i=1 name
+
+	for name in "${CAND[@]}"; do
+		print_entry "$i" "$name"
+		((i++))
+	done
 }
 
 select_model() {
-	local models=()
-	for file in "$MODELS_DIR"/*.gguf; do
-		[[ -f "$file" ]] && models+=("$file")
-	done
-	if [ ${#models[@]} -eq 0 ]; then
+	local filter="$1" choice
+
+	list_local_names
+	if [ ${#CAND[@]} -eq 0 ]; then
 		status_line "Error" "❌ No .gguf models found in $MODELS_DIR"
 		return 1
 	fi
 
-	status_line "Current model" "💚 $(model_name)"
-	status_line "Select a model" "⬇︎"
-
-	local i=1
-	local mname mcomment
-	for m in "${models[@]}"; do
-		mname=$(basename "$m")
-		status_line "$i" "$mname"
-		mcomment=$(get_model_comment "$mname")
-		[[ -n "$mcomment" ]] && printf '%19s %s\n' "" "ⓘ  $mcomment"
-		((i++))
-	done
-
-	read -rp "Choose [1-${#models[@]}]: " choice
-
-	if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#models[@]} ]; then
-		status_line "Error" "❌ Invalid choice."
+	narrow_candidates "$filter"
+	if [ ${#CAND[@]} -eq 0 ]; then
+		status_line "Error" "❌ No model matches '$FILTER_VALUE'."
 		return 1
 	fi
 
-	MODEL="${models[$((choice-1))]}"
+	status_line "Current model" "💚 $(model_name)"
+
+	if [[ "$FILTER_USED" -eq 1 && ${#CAND[@]} -eq 1 ]]; then
+		choice=1
+	else
+		status_line "Select a model" "⬇︎"
+		print_candidates
+
+		read -rp "Choose [1-${#CAND[@]}]: " choice
+
+		if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#CAND[@]} ]; then
+			status_line "Error" "❌ Invalid choice."
+			return 1
+		fi
+	fi
+
+	MODEL="$MODELS_DIR/${CAND[$((choice-1))]}"
 	write_config
 	status_line "Selected model" "👮 $(model_name)"
 
@@ -263,6 +511,68 @@ set_port() {
 	fi
 }
 
+# First usable editor: saved preference, $VISUAL, $EDITOR, vi, nano
+resolve_editor() {
+	local candidate first
+
+	for candidate in "$EDITOR_CMD" "$VISUAL" "$EDITOR" vi nano; do
+		[[ -n "$candidate" ]] || continue
+		read -r first _ <<< "$candidate"
+		if [[ -n "$first" ]] && check4command "$first"; then
+			printf '%s' "$candidate"
+			return 0
+		fi
+	done
+	return 1
+}
+
+set_editor() {
+	shift
+	local cmd="$*" first
+
+	if [[ -z "$cmd" ]]; then
+		status_line "Editor" "✏️  saved: ${EDITOR_CMD:-none} | in use: $(resolve_editor || echo none)"
+		return 0
+	fi
+
+	if [[ "$cmd" == "default" ]]; then
+		EDITOR_CMD=""
+		write_config
+		status_line "Editor" "✏️  preference cleared (in use: $(resolve_editor || echo none))"
+		return 0
+	fi
+
+	if [[ "$cmd" == *$'\n'* ]]; then
+		status_line "Error" "❌ Editor command must be a single line."
+		return 1
+	fi
+
+	read -r first _ <<< "$cmd"
+	if ! check4command "$first"; then
+		status_line "Error" "❌ Command not found: $first"
+		return 1
+	fi
+
+	EDITOR_CMD="$cmd"
+	write_config
+	status_line "Editor" "✏️  $EDITOR_CMD"
+}
+
+# "/owner/repo/..." gets the Hugging Face host; Hugging Face /blob/ links become /resolve/
+normalize_model_url() {
+	local input="$1"
+
+	if [[ "$input" == /* ]]; then
+		input="https://huggingface.co$input"
+	fi
+
+	if [[ "$input" == https://huggingface.co/* ]]; then
+		input="${input/\/blob\///resolve/}"
+	fi
+
+	printf '%s' "$input"
+}
+
 add_model() {
 	local input="$1"
 	local note="${2:-To be tested}"
@@ -272,90 +582,83 @@ add_model() {
 		return 1
 	fi
 
-	# If URL starts with "/", it's prefixed with Hugging Face host
-	if [[ "$input" == /* ]]; then
-		input="https://huggingface.co$input"
+	input=$(normalize_model_url "$input")
+
+	local filename="${input%%\?*}"
+	filename="${filename##*/}"
+
+	if ! valid_model_name "$filename"; then
+		status_line "Error" "❌ Invalid model URL or filename."
+		return 1
 	fi
 
-	# Convert link /blob/ copied from browser, if any, into /resolve/ (Hugging Face only)
-	if [[ "$input" == https://huggingface.co/* ]]; then
-		input="${input/\/blob\///resolve/}"
-	fi
-
-	local filename
-	filename=$(basename "$input")
-
-	touch "$KNOWN_MODELS"
-
-	if awk -F'\t' -v f="$filename" '$1 == f { found=1; exit } END { exit !found }' "$KNOWN_MODELS" 2>/dev/null; then
-		status_line "Skip" "ℹ️  '$filename' already exists in .known.llama"
+	if [[ -n "$(get_model_url "$filename")" ]]; then
+		status_line "Skip" "ℹ️  '$filename' already has a URL in $(basename "$KNOWN_MODELS")/"
 		return 0
 	fi
 
-	printf "%s\t%s\t%s\n" "$filename" "$input" "$note" >> "$KNOWN_MODELS"
-	status_line "Added" "✅ '$filename' added to .known.llama"
+	set_model_url "$filename" "$input"
+	# Keep notes already written for this model, if any
+	[[ -f "$(note_file "$filename")" ]] || set_model_note "$filename" "$note"
+	status_line "Added" "✅ '$filename' added to $(basename "$KNOWN_MODELS")/"
 }
 
 download_model() {
 	local url="$2"
 
-	if [[ -z "$url" ]]; then
-		local models=()
-		local urls=()
-		local comments=()
-		local line filename rest saved_url comment
+	# "/owner/repo/..." is a Hugging Face path, not a filter
+	[[ "$url" == /* ]] && url=$(normalize_model_url "$url")
 
-		if [[ -f "$KNOWN_MODELS" ]]; then
-			while IFS= read -r line || [[ -n "$line" ]]; do
-				filename="${line%%$'\t'*}"
-				[[ -n "$filename" && "$line" == *$'\t'* ]] || continue
+	if [[ "$url" != http://* && "$url" != https://* ]]; then
+		# Empty or not a URL: pick from known models not yet downloaded, using $url as filter
+		local filter="$url" all name saved_url choice
+		url=""
 
-				rest="${line#*$'\t'}"
-				saved_url="${rest%%$'\t'*}"
+		list_known_names
+		all=("${CAND[@]}")
+		CAND=()
+		for name in "${all[@]}"; do
+			if [[ -n "$(get_model_url "$name")" && ! -f "$MODELS_DIR/$name" ]]; then
+				CAND+=("$name")
+			fi
+		done
 
-				[[ -n "$saved_url" && "$saved_url" != "-" ]] || continue
-
-				comment=""
-				if [[ "$rest" == *$'\t'* ]]; then
-					comment="${rest#*$'\t'}"
-				fi
-				
-				if [[ ! -f "$MODELS_DIR/$filename" ]]; then
-					models+=("$filename")
-					urls+=("$saved_url")
-					comments+=("$comment")
-				fi
-			done < "$KNOWN_MODELS"
+		if [[ ${#CAND[@]} -gt 0 ]]; then
+			narrow_candidates "$filter"
 		fi
 
-		if [[ ${#models[@]} -gt 0 ]]; then
+		if [[ ${#CAND[@]} -eq 0 ]]; then
+			if [[ -n "$filter" || "$FILTER_USED" -eq 1 ]]; then
+				status_line "Error" "❌ No downloadable model matches '${FILTER_VALUE:-$filter}'."
+				return 1
+			fi
+			read -rp "Enter model URL: " url
+		elif [[ "$FILTER_USED" -eq 1 && ${#CAND[@]} -eq 1 ]]; then
+			read -rp "Download ${CAND[0]}? [Y/n]: " choice
+			[[ "$choice" =~ ^[nN]$ ]] && return 0
+			url=$(get_model_url "${CAND[0]}")
+		else
 			echo "Known models available for download:"
+			print_candidates
 
-			for ((i=0; i<${#models[@]}; i++)); do
-				status_line "$((i+1))" "${models[$i]}"
-				[[ -n "${comments[$i]}" ]] &&
-					printf '%19s %s\n' "" "ⓘ  ${comments[$i]}"
-			done
-
-			read -rp "Choose [1-${#models[@]}] or enter URL: " choice
+			read -rp "Choose [1-${#CAND[@]}] or enter URL: " choice
 
 			if [[ "$choice" =~ ^[0-9]+$ ]]; then
-				if [[ "$choice" -lt 1 || "$choice" -gt ${#models[@]} ]]; then
+				if [[ "$choice" -lt 1 || "$choice" -gt ${#CAND[@]} ]]; then
 					status_line "Error" "❌ Invalid choice."
 					return 1
 				fi
-				url="${urls[$((choice-1))]}"
+				url=$(get_model_url "${CAND[$((choice-1))]}")
 			else
 				url="$choice"
 			fi
-		else
-			read -rp "Enter model URL: " url
 		fi
 	fi
+	url=$(normalize_model_url "$url")
 	local filename="${url%%\?*}"
 	filename="${filename##*/}"
 
-	if [[ -z "$filename" ]] || ! [[ "$filename" =~ ^[a-zA-Z0-9._-]+\.gguf$ ]]; then
+	if ! valid_model_name "$filename"; then
 		status_line "Error" "❌ Invalid model URL or filename."
 		return 1
 	fi
@@ -390,40 +693,40 @@ download_model() {
 		return 1
 	fi
 
-	save_known_model "$filename" "$url"
+	set_model_url "$filename" "$url"
 
 	status_line "Downloaded" "👮 $filename"
 }
 
 delete_model() {
-	local models=()
-	for file in "$MODELS_DIR"/*.gguf; do
-		[[ -f "$file" ]] && models+=("$file")
-	done
-	
-	if [ ${#models[@]} -eq 0 ]; then
+	local filter="$1" choice
+
+	list_local_names
+	if [ ${#CAND[@]} -eq 0 ]; then
 		status_line "Error" "❌ No models found."
 		return 1
 	fi
 
-	local i=1
-	local mname mcomment
-	for m in "${models[@]}"; do
-		mname=$(basename "$m")
-		status_line "$i" "$mname"
-		mcomment=$(get_model_comment "$mname")
-		[[ -n "$mcomment" ]] && printf '%19s %s\n' "" "ⓘ  $mcomment"
-		((i++))
-	done
-	
-	read -rp "Choose [1-${#models[@]}]: " choice
-
-	if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#models[@]} ]; then
-		status_line "Error" "❌ Invalid choice."
+	narrow_candidates "$filter"
+	if [ ${#CAND[@]} -eq 0 ]; then
+		status_line "Error" "❌ No model matches '$FILTER_VALUE'."
 		return 1
 	fi
 
-	local target="${models[$((choice-1))]}"
+	if [[ "$FILTER_USED" -eq 1 && ${#CAND[@]} -eq 1 ]]; then
+		choice=1
+	else
+		print_candidates
+
+		read -rp "Choose [1-${#CAND[@]}]: " choice
+
+		if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#CAND[@]} ]; then
+			status_line "Error" "❌ Invalid choice."
+			return 1
+		fi
+	fi
+
+	local target="$MODELS_DIR/${CAND[$((choice-1))]}"
 
 	read -rp "👍 Delete $(basename "$target")? [y/N]: " ans
 	[[ "$ans" =~ ^[yY]$ ]] || return 0
@@ -454,146 +757,200 @@ delete_model() {
 	status_line "Deleted" "🗑️  $(basename "$target")"
 }
 
-save_known_model() {
-	local filename="$1"
-	local url="$2"
-	local tmp="$KNOWN_MODELS.tmp.$$"
-	local found=0
+show_model_notes() {
+	local name="$1" file line
+	file=$(note_file "$name")
 
-	while IFS= read -r line || [[ -n "$line" ]]; do
-		local name="${line%%$'\t'*}"
-		local rest="${line#*$'\t'}"
-		local saved_url="${rest%%$'\t'*}"
-		local comment=""
-
-		if [[ "$rest" == *$'\t'* ]]; then
-			comment="${rest#*$'\t'}"
-		fi
-
-		if [[ "$name" == "$filename" ]]; then
-			printf '%s\t%s\t%s\n' "$filename" "$url" "$comment"
-			found=1
-		else
-			printf '%s\n' "$line"
-		fi
-	done < "$KNOWN_MODELS" > "$tmp"
-
-	if [[ "$found" -eq 0 ]]; then
-		printf '%s\t%s\t\n' "$filename" "$url" >> "$tmp"
-	fi
-
-	mv "$tmp" "$KNOWN_MODELS"
-}
-
-comment_model() {
-	shift
-
-	if [[ -z "$MODEL" ]]; then
-		status_line "Error" "💔 No model selected."
-		return 1
-	fi
-
-	local filename
-	filename=$(basename "$MODEL")
-	local comment="$*"
-	local found=0
-	local current=""
-	local line name rest url
-	local tmp="$KNOWN_MODELS.tmp.$$"
-
-	touch "$KNOWN_MODELS" || return 1
-
-	while IFS= read -r line || [[ -n "$line" ]]; do
-		name="${line%%$'\t'*}"
-		[[ "$line" == *$'\t'* ]] || continue
-		rest="${line#*$'\t'}"
-
-		if [[ "$name" == "$filename" ]]; then
-			found=1
-			if [[ "$rest" == *$'\t'* ]]; then
-				current="${rest#*$'\t'}"
-			fi
-			break
-		fi
-	done < "$KNOWN_MODELS"
-
-	if [[ -z "$comment" ]]; then
-		status_line "Model" "💚 $filename"
-		if [[ "$found" -eq 0 ]]; then
-			status_line "Comment" "ⓘ  [No comment]"
-		else
-			status_line "Comment" "ⓘ  ${current:-No comment}"
-		fi
+	if [[ ! -s "$file" ]]; then
+		status_line "Comment" "ⓘ  [No comment]"
 		return 0
 	fi
 
-	if [[ "$comment" == *$'\t'* || "$comment" == *$'\n'* ]]; then
-		status_line "Error" "❌ Tabs and newlines are not allowed in comments."
+	status_line "Comment" "ⓘ"
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		printf '%19s %s\n' "" "${line%$'\r'}"
+	done < "$file"
+}
+
+edit_model_notes() {
+	local name="$1" file editor content
+	local parts=()
+	file=$(note_file "$name")
+
+	if [[ ! -t 0 || ! -t 1 ]]; then
+		status_line "Error" "❌ An interactive terminal is required to edit notes."
 		return 1
 	fi
 
-	if [[ "$found" -eq 0 ]]; then
-		printf '%s\t-\t%s\n' "$filename" "$comment" >> "$KNOWN_MODELS"
-	else
-		while IFS= read -r line || [[ -n "$line" ]]; do
-			name="${line%%$'\t'*}"
-			if [[ "$name" == "$filename" ]]; then
-				rest="${line#*$'\t'}"
-				url="${rest%%$'\t'*}"
-				printf '%s\t%s\t%s\n' "$filename" "$url" "$comment"
-			else
-				printf '%s\n' "$line"
-			fi
-		done < "$KNOWN_MODELS" > "$tmp"
-
-		mv "$tmp" "$KNOWN_MODELS" || return 1
+	if ! editor=$(resolve_editor); then
+		status_line "Error" "❌ No editor found. Set one with: $0 editor <cmd>"
+		return 1
 	fi
 
-	status_line "Comment" "ⓘ  Updated for $filename"
+	read -r -a parts <<< "$editor"
+	"${parts[@]}" "$file"
+
+	# Do not leave empty notes behind
+	if [[ -f "$file" ]]; then
+		content=$(<"$file")
+		if [[ -z "${content//[[:space:]]/}" ]]; then
+			rm -f "$file"
+		fi
+	fi
+	status_line "Comment" "ⓘ  Saved for $name"
+}
+
+# Pick any known or local model for the notes menu. Sets NOTE_TARGET.
+choose_note_target() {
+	local choice
+
+	NOTE_TARGET=""
+
+	list_note_targets
+	if [[ ${#CAND[@]} -eq 0 ]]; then
+		status_line "Error" "💔 No models found."
+		return 1
+	fi
+
+	narrow_candidates ""
+	if [[ ${#CAND[@]} -eq 0 ]]; then
+		status_line "Error" "❌ No model matches '$FILTER_VALUE'."
+		return 1
+	fi
+
+	if [[ "$FILTER_USED" -eq 1 && ${#CAND[@]} -eq 1 ]]; then
+		NOTE_TARGET="${CAND[0]}"
+		return 0
+	fi
+
+	status_line "Select a model" "⬇︎"
+	print_candidates
+
+	read -rp "Choose [1-${#CAND[@]}]: " choice || choice=""
+	if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#CAND[@]} ]; then
+		status_line "Error" "❌ Invalid choice."
+		return 1
+	fi
+	NOTE_TARGET="${CAND[$((choice-1))]}"
+}
+
+# Notes menu for model $1. [m]odel switches the target and shows the menu again.
+comment_menu() {
+	local name="$1" action text ans icon
+
+	while true; do
+		icon="📀"
+		[[ -n "$MODEL" && "$name" == "$(basename "$MODEL")" ]] && icon="💚"
+		status_line "Model" "$icon $name"
+		read -rp "[v]iew [e]dit [r]eplace [a]dd [d]elete [m]odel (Enter = view): " action || return 0
+
+		case "$action" in
+			""|[vV]*)
+				show_model_notes "$name"
+				return 0
+				;;
+			[eE]*)
+				edit_model_notes "$name"
+				return $?
+				;;
+			[rR]*)
+				read -rp "New comment (empty = cancel): " text
+				if [[ -z "$text" ]]; then
+					status_line "Comment" "ⓘ  Unchanged"
+				else
+					set_model_note "$name" "$text"
+					status_line "Comment" "ⓘ  Updated for $name"
+				fi
+				return 0
+				;;
+			[aA]*)
+				read -rp "Line to add (empty = cancel): " text
+				if [[ -z "$text" ]]; then
+					status_line "Comment" "ⓘ  Unchanged"
+				else
+					append_model_note "$name" "$text"
+					status_line "Comment" "ⓘ  Added to $name"
+				fi
+				return 0
+				;;
+			[dD]*)
+				read -rp "Delete all notes for $name? [y/N]: " ans
+				if [[ "$ans" =~ ^[yY]$ ]]; then
+					rm -f "$(note_file "$name")"
+					status_line "Comment" "ⓘ  Deleted for $name"
+				fi
+				return 0
+				;;
+			[mM]*)
+				if choose_note_target; then
+					name="$NOTE_TARGET"
+				fi
+				;;
+			*)
+				status_line "Error" "❌ Invalid choice."
+				return 1
+				;;
+		esac
+	done
+}
+
+# With text: replaces the notes of the current model.
+# Without text: notes menu for the current model (or a model to pick, if none is selected).
+comment_model() {
+	shift
+
+	local name text="$*"
+
+	if [[ -n "$text" ]]; then
+		if [[ -z "$MODEL" ]]; then
+			status_line "Error" "💔 No model selected."
+			return 1
+		fi
+		name=$(basename "$MODEL")
+		set_model_note "$name" "$text"
+		status_line "Comment" "ⓘ  Updated for $name"
+		return 0
+	fi
+
+	if [[ -n "$MODEL" ]]; then
+		name=$(basename "$MODEL")
+	else
+		choose_note_target || return 1
+		name="$NOTE_TARGET"
+	fi
+	comment_menu "$name"
 }
 
 list_known_models() {
-	local filter_url=0
+	local filter="$1" name cname comment
 
-	[[ "$1" == "url" ]] && filter_url=1
-
-	if [[ ! -s "$KNOWN_MODELS" ]]; then
+	list_known_names
+	if [[ ${#CAND[@]} -eq 0 ]]; then
 		status_line "Error" "💔 No known models."
 		return 1
 	fi
 
-	local line filename rest url comment
+	narrow_candidates "$filter"
+	if [[ ${#CAND[@]} -eq 0 ]]; then
+		status_line "Error" "💔 No known model matches '$FILTER_VALUE'."
+		return 1
+	fi
 
-	while IFS= read -r line || [[ -n "$line" ]]; do
-		filename="${line%%$'\t'*}"
-		[[ -n "$filename" && "$line" == *$'\t'* ]] || continue
-
-		rest="${line#*$'\t'}"
-		url="${rest%%$'\t'*}"
-		comment=""
-
-		if [[ "$rest" == *$'\t'* ]]; then
-			comment="${rest#*$'\t'}"
-		fi
-
-		if [[ "$filter_url" -eq 1 && ( -z "$url" || "$url" == "-" ) ]]; then
-			continue
-		fi
-		
-		if [[ -f "$MODELS_DIR/$filename" ]]; then
-			local cname
-			cname=$(model_name)
-			if [[ "$filename" == "$cname" ]]; then
-				status_line "Current" "💚 $filename"
+	cname=$(model_name)
+	for name in "${CAND[@]}"; do
+		if [[ -f "$MODELS_DIR/$name" ]]; then
+			if [[ "$name" == "$cname" ]]; then
+				status_line "Current" "💚 $name"
 			else
-				status_line "Available" "📀 $filename"
+				status_line "Available" "📀 $name"
 			fi
 		else
-			status_line "Known" "☁️  $filename"
+			status_line "Known" "☁️  $name"
 		fi
+		comment=$(get_model_preview "$name")
 		[[ -n "$comment" ]] && printf '%19s %s\n' "" "ⓘ  $comment"
 		echo ""
-	done < "$KNOWN_MODELS"
+	done
 }
 
 port_is_ours() {
@@ -964,6 +1321,7 @@ interactive_shell() {
 		"  t 🔍 Tail log         " \
 		"log 📝 Set log level    " \
 		"  p 🚪 Set port         " \
+		" ed ✏️  Set editor       " \
 		"  x 👋 Exit             "
 	do
 		case "$REPLY" in
@@ -987,8 +1345,7 @@ interactive_shell() {
 				select_model
 				;;
 			c|6)
-				read -rp "Comment (empty to show current): " value
-				comment_model comment "$value"
+				comment_model comment
 				;;
 			add|7)
 				read -rp "URL (empty to stop): " url
@@ -1017,7 +1374,12 @@ interactive_shell() {
 				read -rp "Port [1025-65535]: " value
 				set_port port "$value"
 				;;
-			x|14)
+			ed|editor|14)
+				status_line "Editor" "✏️  saved: ${EDITOR_CMD:-none} | in use: $(resolve_editor || echo none)"
+				read -rp "Editor command (empty = keep, 'default' = reset; e.g. vim, nano, code -w): " value
+				[[ -n "$value" ]] && set_editor editor "$value"
+				;;
+			x|15)
 				echo "👋 Bye!"
 				break
 				;;
@@ -1057,7 +1419,7 @@ else
 			start
 			;;
 		m|model|select)
-			select_model
+			select_model "$2"
 			;;
 		hf|add)
 			add_model "$2" "$3"
@@ -1069,10 +1431,10 @@ else
 			comment_model "$@"
 			;;
 		l|list)
-			list_known_models
+			list_known_models "$2"
 			;;
 		rm|delete)
-			delete_model
+			delete_model "$2"
 			;;
 		t|tail)
 			watch_log
@@ -1082,6 +1444,9 @@ else
 			;;
 		p|port)
 			set_port "$@"
+			;;
+		ed|editor)
+			set_editor "$@"
 			;;
 		help|-h|--help)
 			echo
@@ -1093,15 +1458,19 @@ else
 			status_line ". q stop" "🔴 Stop llama-server"
 			status_line "h status" "🟠 Llama-server status"
 			status_line "r restart" "🔵 Restart llama-server"
-			status_line "m model" "💚 Select current active model"
+			status_line "m model [filter]" "💚 Select current active model"
 			status_line "hf add" "🌤️  Add a downloadable model URI"
-			status_line "d download" "☁️  Download a model"
-			status_line "rm delete" "🗑️  Delete a downloaded model"
-			status_line "c comment" "ⓘ  View or edit current model comment"
-			status_line "l list" "👮 List all known models"
+			status_line "d download [filter|url]" "☁️  Download a model"
+			status_line "rm delete [filter]" "🗑️  Delete a downloaded model"
+			status_line "c comment [text]" "ⓘ  Set current model comment (no text: menu)"
+			status_line "l list [filter]" "👮 List known models"
 			status_line "t tail" "🔍 Tail log (live view)"
 			status_line "log" "📝 Set log level ($LOG_LEVEL [1..4])"
 			status_line "p port" "🚪 Change port (:$PORT)"
+			status_line "ed editor [cmd]" "✏️  Show or set the notes editor"
+			echo
+			echo "Filters are case-insensitive substrings matched on name, URL and first comment line."
+			echo "Without a filter, lists longer than $FILTER_THRESHOLD entries ask for one (Enter = show all)."
 			echo
 			;;
 		version|-v|--version)
@@ -1117,7 +1486,7 @@ else
 			echo
 			;;
 		*)
-			status_line "Commands" "❓ Use: $0 {start|stop|status|restart|model|add|download|delete|comment|list|tail|log|port}"
+			status_line "Commands" "❓ Use: $0 {start|stop|status|restart|model|add|download|delete|comment|list|tail|log|port|editor}"
 			status_line "Options" "❓ Use: $0 {-h|--help|help|-v|--version|version}"
 			status_line "Shell" "❓ Use: $0 (without parameters or options) for interactive shell"
 			exit 1
