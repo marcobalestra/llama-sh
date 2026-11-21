@@ -31,7 +31,7 @@ When you are ready for full agentic coding workflows inside your IDE, the same l
 1. **Download the script** into a dedicated directory (e.g., `~/AI/`):
    ```bash
    mkdir -p ~/AI && cd ~/AI
-   curl -O https://githubusercontent.com/marcobalestra/llama-sh/main/llama.sh
+   curl -O https://raw.githubusercontent.com/marcobalestra/llama-sh/main/llama.sh
    chmod +x llama.sh
    ```
 
