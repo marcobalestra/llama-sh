@@ -1108,12 +1108,12 @@ else
 			echo
 			status_line "Script" "🦙 Self-Contained Local AI Agent Ecosystem"
 			status_line "Version" "🔖 $THIS_SCRIPT_VERSION"
+			status_line "Author" "🏹 Marco Balestra"
 			if check4command "llama-server"; then
 				llama_ver=$(llama-server --version 2>&1 | awk '/^version:/ { sub(/^version:[[:space:]]*/, ""); print; exit }')
 				[[ -z "$llama_ver" ]] && llama_ver=$(llama-server --version 2>&1 | head -n 1)
 				status_line "llama-server" "⚙️  ${llama_ver:-unknown}"
 			fi
-			status_line "Author" "🏹 Marco Balestra"
 			echo
 			;;
 		*)
