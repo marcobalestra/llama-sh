@@ -31,7 +31,7 @@ When you are ready for full agentic coding workflows inside your IDE, the same l
 1. **Download the script** into a dedicated directory (e.g., `~/AI/`):
    ```bash
    mkdir -p ~/AI && cd ~/AI
-   curl -O https://githubusercontent.com<your-username>/<your-repo>/main/llama.sh
+   curl -O https://githubusercontent.com/marcobalestra/llama-sh/main/llama.sh
    chmod +x llama.sh
    ```
 
@@ -111,7 +111,7 @@ so switching models in `llama.sh` requires zero config changes in your agent):
 - **OpenCode (`~/.config/opencode/opencode.json`):**
   ```json
   {
-    "$schema": "https://opencode.aiconfig.json",
+    "$schema": "https://opencode.ai/config.json",
     "provider": {
       "llamacpp": {
         "npm": "@ai-sdk/openai-compatible",
