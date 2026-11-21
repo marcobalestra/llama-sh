@@ -1,5 +1,6 @@
 #!/bin/bash
 
+THIS_SCRIPT_VERSION="1.0"
 THIS_SCRIPT_SOURCE="${BASH_SOURCE[0]}"
 while [[ -L "$THIS_SCRIPT_SOURCE" ]]; do
 	DIR="$(cd -P "$(dirname "$THIS_SCRIPT_SOURCE")" && pwd)"
@@ -1103,9 +1104,16 @@ else
 			status_line "p port" "🚪 Change port (:$PORT)"
 			echo
 			;;
+		version|-v|--version)
+			status_line "Version" "🔖 $THIS_SCRIPT_VERSION"
+			status_line "Script" "🦙 Self-Contained Local AI Agent Ecosystem"
+			status_line "Author" "🏹 Marco Balestra"
+			echo
+			;;
 		*)
 			status_line "Parameters" "❓ Use: $0 {start|stop|status|restart|model|add|download|delete|comment|list|tail|log|port}"
-			status_line "Shell" "❓ Use: $0 (without parameters) for interactive shell"
+			status_line "Options" "❓ Use: $0 {-h|--help|help|-v|--version|version}"
+			status_line "Shell" "❓ Use: $0 (without parameters or options) for interactive shell"
 			exit 1
 			;;
 	esac
