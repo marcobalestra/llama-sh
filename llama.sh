@@ -246,7 +246,7 @@ check_setup() {
 }
 
 status_line() {
-	printf "   %14s : %s\n" "$1" "$2"
+	printf "   %24s : %s\n" "$1" "$2"
 }
 
 get_selected_model() {
@@ -1383,6 +1383,12 @@ interactive_shell() {
 				echo "👋 Bye!"
 				break
 				;;
+			help|-h|--help)
+				show_help
+				;;
+			version|-v|--version)
+				show_version
+				;;
 			*)
 				echo "❌ Invalid choice."
 				;;
@@ -1391,6 +1397,45 @@ interactive_shell() {
 		echo "[Press enter to show commands]"
 		echo
 	done
+}
+
+show_help() {
+	echo
+	status_line "Syntax" "$0 [command]"
+	status_line "(no command)" "🦙 Interactive shell"
+	echo
+	echo "Commands:"
+	status_line "s start" "🟢 Start llama-server"
+	status_line ". q stop" "🔴 Stop llama-server"
+	status_line "h status" "🟠 Llama-server status"
+	status_line "r restart" "🔵 Restart llama-server"
+	status_line "m model [filter]" "💚 Select current active model"
+	status_line "hf add" "🌤️  Add a downloadable model URI"
+	status_line "d download [filter|url]" "☁️  Download a model"
+	status_line "rm delete [filter]" "🗑️  Delete a downloaded model"
+	status_line "c comment [text]" "ⓘ  Set current model comment (no text: menu)"
+	status_line "l list [filter]" "👮 List known models"
+	status_line "t tail" "🔍 Tail log (live view)"
+	status_line "log" "📝 Set log level ($LOG_LEVEL [1..4])"
+	status_line "p port" "🚪 Change port (:$PORT)"
+	status_line "ed editor [cmd]" "✏️  Show or set the notes editor"
+	echo
+	echo "Filters are case-insensitive substrings matched on name, URL and first comment line."
+	echo "Without a filter, lists longer than $FILTER_THRESHOLD entries ask for one (Enter = show all)."
+	echo
+}
+
+show_version(){
+	echo
+	status_line "Script" "🦙 Self-Contained Local AI Agent Ecosystem"
+	status_line "Version" "🔖 $THIS_SCRIPT_VERSION"
+	status_line "Author" "🏹 Marco Balestra"
+	if check4command "llama-server"; then
+		llama_ver=$(llama-server --version 2>&1 | awk '/^version:/ { sub(/^version:[[:space:]]*/, ""); print; exit }')
+		[[ -z "$llama_ver" ]] && llama_ver=$(llama-server --version 2>&1 | head -n 1)
+		status_line "llama-server" "⚙️  ${llama_ver:-unknown}"
+	fi
+	echo
 }
 
 if ! check_setup; then
@@ -1449,41 +1494,10 @@ else
 			set_editor "$@"
 			;;
 		help|-h|--help)
-			echo
-			status_line "Syntax" "$0 [command]"
-			status_line "(no command)" "🦙 Interactive shell"
-			echo
-			echo "Commands:"
-			status_line "s start" "🟢 Start llama-server"
-			status_line ". q stop" "🔴 Stop llama-server"
-			status_line "h status" "🟠 Llama-server status"
-			status_line "r restart" "🔵 Restart llama-server"
-			status_line "m model [filter]" "💚 Select current active model"
-			status_line "hf add" "🌤️  Add a downloadable model URI"
-			status_line "d download [filter|url]" "☁️  Download a model"
-			status_line "rm delete [filter]" "🗑️  Delete a downloaded model"
-			status_line "c comment [text]" "ⓘ  Set current model comment (no text: menu)"
-			status_line "l list [filter]" "👮 List known models"
-			status_line "t tail" "🔍 Tail log (live view)"
-			status_line "log" "📝 Set log level ($LOG_LEVEL [1..4])"
-			status_line "p port" "🚪 Change port (:$PORT)"
-			status_line "ed editor [cmd]" "✏️  Show or set the notes editor"
-			echo
-			echo "Filters are case-insensitive substrings matched on name, URL and first comment line."
-			echo "Without a filter, lists longer than $FILTER_THRESHOLD entries ask for one (Enter = show all)."
-			echo
+			show_help
 			;;
 		version|-v|--version)
-			echo
-			status_line "Script" "🦙 Self-Contained Local AI Agent Ecosystem"
-			status_line "Version" "🔖 $THIS_SCRIPT_VERSION"
-			status_line "Author" "🏹 Marco Balestra"
-			if check4command "llama-server"; then
-				llama_ver=$(llama-server --version 2>&1 | awk '/^version:/ { sub(/^version:[[:space:]]*/, ""); print; exit }')
-				[[ -z "$llama_ver" ]] && llama_ver=$(llama-server --version 2>&1 | head -n 1)
-				status_line "llama-server" "⚙️  ${llama_ver:-unknown}"
-			fi
-			echo
+			show_version
 			;;
 		*)
 			status_line "Commands" "❓ Use: $0 {start|stop|status|restart|model|add|download|delete|comment|list|tail|log|port|editor}"
