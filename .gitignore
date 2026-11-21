@@ -4,6 +4,7 @@
 .known.llama
 .known.llama.tmp.*
 activity-llama.log
+Roadmap*
 
 # Downloaded GGUF models and partial downloads
 Models/
