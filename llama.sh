@@ -1,6 +1,6 @@
 #!/bin/bash
 
-THIS_SCRIPT_VERSION="1.0"
+THIS_SCRIPT_VERSION="v1.1"
 THIS_SCRIPT_SOURCE="${BASH_SOURCE[0]}"
 while [[ -L "$THIS_SCRIPT_SOURCE" ]]; do
 	DIR="$(cd -P "$(dirname "$THIS_SCRIPT_SOURCE")" && pwd)"
@@ -1105,13 +1105,19 @@ else
 			echo
 			;;
 		version|-v|--version)
-			status_line "Version" "🔖 $THIS_SCRIPT_VERSION"
+			echo
 			status_line "Script" "🦙 Self-Contained Local AI Agent Ecosystem"
+			status_line "Version" "🔖 $THIS_SCRIPT_VERSION"
+			if check4command "llama-server"; then
+				llama_ver=$(llama-server --version 2>&1 | awk '/^version:/ { sub(/^version:[[:space:]]*/, ""); print; exit }')
+				[[ -z "$llama_ver" ]] && llama_ver=$(llama-server --version 2>&1 | head -n 1)
+				status_line "llama-server" "⚙️  ${llama_ver:-unknown}"
+			fi
 			status_line "Author" "🏹 Marco Balestra"
 			echo
 			;;
 		*)
-			status_line "Parameters" "❓ Use: $0 {start|stop|status|restart|model|add|download|delete|comment|list|tail|log|port}"
+			status_line "Commands" "❓ Use: $0 {start|stop|status|restart|model|add|download|delete|comment|list|tail|log|port}"
 			status_line "Options" "❓ Use: $0 {-h|--help|help|-v|--version|version}"
 			status_line "Shell" "❓ Use: $0 (without parameters or options) for interactive shell"
 			exit 1
