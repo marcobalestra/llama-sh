@@ -1325,52 +1325,52 @@ interactive_shell() {
 		"  x 👋 Exit             "
 	do
 		case "$REPLY" in
-			s|1)
+			s|start|1)
 				start
 				watch_log
 				;;
-			.|q|2)
+			.|q|stop|2)
 				stop
 				;;
-			h|3)
+			h|status|3)
 				status
 				;;
-			r|4)
+			r|restart|4)
 				stop
 				sleep 1
 				start
 				watch_log
 				;;
-			m|5)
+			m|model|5)
 				select_model
 				;;
-			c|6)
+			c|comment|6)
 				comment_model comment
 				;;
-			add|7)
+			add|hf|7)
 				read -rp "URL (empty to stop): " url
 				if [[ -n "$url" ]]; then
 					read -rp "Comment (can be empty): " value
 					add_model "$url" "$value"
 				fi
 				;;
-			d|8)
+			d|download|8)
 				download_model download
 				;;
-			rm|9)
+			rm|delete|9)
 				delete_model
 				;;
-			l|10)
+			l|list|10)
 				list_known_models
 				;;
-			t|11)
+			t|tail|11)
 				watch_log
 				;;
 			log|12)
 				read -rp "Log level [1-4]: " value
 				set_log_level log "$value"
 				;;
-			p|13)
+			p|port|13)
 				read -rp "Port [1025-65535]: " value
 				set_port port "$value"
 				;;
@@ -1379,7 +1379,7 @@ interactive_shell() {
 				read -rp "Editor command (empty = keep, 'default' = reset; e.g. vim, nano, code -w): " value
 				[[ -n "$value" ]] && set_editor editor "$value"
 				;;
-			x|15)
+			x|exit|15)
 				echo "👋 Bye!"
 				break
 				;;
