@@ -1,4 +1,6 @@
-# 🦙 llama.sh — A Self-Contained Local AI Agent Ecosystem
+# 🦙 llama.sh  
+
+## A Self-Contained Local AI Agent Ecosystem
 
 **A lightweight, zero-config Bash manager that turns `llama.cpp` into a self-contained local ecosystem for running,
 benchmarking, and experimenting with AI agents on your machine.**
@@ -29,6 +31,7 @@ When you are ready for full agentic coding workflows inside your IDE, the same l
 ## 🚀 Quick Start
 
 1. **Download the script** into a dedicated directory (e.g., `~/AI/`):
+
    ```bash
    mkdir -p ~/AI && cd ~/AI
    curl -O https://raw.githubusercontent.com/marcobalestra/llama-sh/main/llama.sh
@@ -36,9 +39,9 @@ When you are ready for full agentic coding workflows inside your IDE, the same l
    ```
 
 2. **Launch the interactive shell:**
-   ```bash
-   ./llama.sh
-   ```
+
+   `./llama.sh`
+   
    On first run, `llama.sh` creates `Models/llama.cpp/` and seeds `.known.llama` with a curated list of tested GGUF models and real-world benchmark notes.
 
 3. **Download, select, and start:**
@@ -55,6 +58,7 @@ Run `./llama.sh` without arguments for the interactive menu, or pass a command d
 | Command | Alias | Description |
 | :--- | :--- | :--- |
 | `./llama.sh` | *(none)* | Open the interactive shell |
+| `./llama.sh help` | `-h`, `--help` | List of available commands |
 | `./llama.sh start` | `s` | Start `llama-server` with auto-tuned presets |
 | `./llama.sh stop` | `q`, `.` | Gracefully stop `llama-server` |
 | `./llama.sh restart` | `r` | Restart `llama-server` |
@@ -66,8 +70,9 @@ Run `./llama.sh` without arguments for the interactive menu, or pass a command d
 | `./llama.sh comment [text]` | `c` | View or update the benchmark note for the active model |
 | `./llama.sh list` | `l` | List all known and downloaded models with notes |
 | `./llama.sh tail` | `t` | Live-tail `activity-llama.log` (press `Enter` to stop) |
-| `./llama.sh log <1-4>` | `log` | Set `llama-server` log verbosity (`1`–`4`) |
+| `./llama.sh log <1-4>` |  | Set `llama-server` log verbosity (`1`–`4`) |
 | `./llama.sh port <port>` | `p` | Change listening port (default: `8080`) |
+| `./llama.sh version` | `-v`, `--version` | Print script version |
 
 ---
 
@@ -83,9 +88,10 @@ Once `llama-server` is active, open **`http://localhost:8080`** in your browser.
 
 Both **Pi** and **OpenCode** can talk to your local `llama-server` over its OpenAI-compatible
 endpoint (`http://localhost:8080/v1`) using the fixed alias `localLLM`
-so switching models in `llama.sh` requires zero config changes in your agent):
+so switching models in `llama.sh` requires zero config changes in your agent).
 
-- **Pi (`~/.pi/agent/models.json`):**
+#### **Pi (`~/.pi/agent/models.json`):**
+
   ```json
   {
     "providers": {
@@ -108,7 +114,8 @@ so switching models in `llama.sh` requires zero config changes in your agent):
   }
   ```
 
-- **OpenCode (`~/.config/opencode/opencode.json`):**
+#### **OpenCode (`~/.config/opencode/opencode.json`):**
+
   ```json
   {
     "$schema": "https://opencode.ai/config.json",
@@ -132,6 +139,7 @@ so switching models in `llama.sh` requires zero config changes in your agent):
   ```
 
 ### 3. IDE Integration via ACP (`~/.jetbrains/acp.json`)
+
 Wire **Pi** or **OpenCode** into any ACP-compatible IDE (such as WebStorm, IntelliJ IDEA, or Zed):
 
 ```json
