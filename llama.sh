@@ -1,6 +1,6 @@
 #!/bin/bash
 
-THIS_SCRIPT_VERSION="v1.2"
+THIS_SCRIPT_VERSION="v1.3"
 THIS_SCRIPT_SOURCE="${BASH_SOURCE[0]}"
 while [[ -L "$THIS_SCRIPT_SOURCE" ]]; do
 	DIR="$(cd -P "$(dirname "$THIS_SCRIPT_SOURCE")" && pwd)"
@@ -800,6 +800,12 @@ edit_model_notes() {
 	status_line "Comment" "ⓘ  Saved for $name"
 }
 
+has_gguf_sampling() {
+	local file="$1"
+	# Reads the firsts 256 KB for metadata headers, searching for sampling keys
+	head -c 262144 "$file" 2>/dev/null | grep -aqE 'general\.sampling\.(temp|top_k|top_p|min_p)'
+}
+
 # Pick any known or local model for the notes menu. Sets NOTE_TARGET.
 choose_note_target() {
 	local choice
@@ -1127,7 +1133,10 @@ resolve_model_preset() {
 	local fit_target=1536
 	local reasoning="off"
 	local extra=()
-	local sampling=(--temp 0.35 --top-p 0.9 --min-p 0.05 --repeat-penalty 1.08 --repeat-last-n 128)
+	local sampling=()
+	if ! has_gguf_sampling "$MODEL"; then
+		sampling=(--temp 0.35 --top-p 0.9 --min-p 0.05 --repeat-penalty 1.08 --repeat-last-n 128)
+	fi
 
 	# 1. Dynamic sizing based on available RAM vs GGUF file weight
 	if (( headroom_mb >= 14000 )); then

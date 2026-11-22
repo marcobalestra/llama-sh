@@ -1,4 +1,4 @@
-# 🦙 llama.sh  v1.2
+# 🦙 llama.sh  v1.3
 
 ## A Self-Contained Local AI Agent Ecosystem
 
@@ -21,7 +21,7 @@ When you are ready for full agentic coding workflows inside your IDE, the same l
 - **Self-Contained Local Ecosystem:** Automatically sets up your local directory structure
  (`Models/llama.cpp`, `.llama` state, `.known.llama/` registry, `activity-llama.log`)
  and checks/installs `llama-server` (plus `pi` if desired) when missing.
-- **Hardware-Aware Auto-Tuning (macOS & Debian/Ubuntu):** Measures real-time available memory (`memory_pressure` on macOS, `/proc/meminfo` on Linux) against the selected `.gguf` file size to automatically configure `--ctx-size`, batch/ubatch sizes, `--fit`, reasoning budgets, and family-specific sampling parameters (Qwen3, Devstral, thinking models, etc.).
+- **Hardware-Aware & GGUF-Native Auto-Tuning (macOS & Debian/Ubuntu):** Measures real-time available memory (`memory_pressure` on macOS, `/proc/meminfo` on Linux) against the selected `.gguf` file size to configure `--ctx-size`, batch/ubatch sizes, `--fit`, and reasoning budgets. Automatically honors embedded `general.sampling.*` metadata from the GGUF header when present, falling back to safe defaults (or family-specific overrides like Qwen3 and Devstral) when omitted.
 - **Built-in Web UI + OpenAI-Compatible API:** Starts `llama-server` with `--alias localLLM`, `--jinja`, and flash attention enabled—ready for immediate browser testing at `http://localhost:8080` or any OpenAI-compatible agent harness.
 - **Curated Model Registry & Notes (`.known.llama/`):** Add Hugging Face URLs or shorthand paths (`/user/repo/resolve/main/model.gguf`), resume interrupted downloads (`curl -C -`), and attach personal multi-line benchmark notes to each model, edited inline or in your favorite editor.
 - **Instant Filtering:** Find models by a simple case-insensitive substring (`./llama.sh m qwen`), matched on name, URL, and the first line of your notes.
@@ -74,7 +74,7 @@ Run `./llama.sh` without arguments for the interactive menu, or pass a command d
 | `./llama.sh tail` | `t` | Live-tail `activity-llama.log` (press `Enter` to stop) |
 | `./llama.sh log <1-4>` |  | Set `llama-server` log verbosity (`1`–`4`) |
 | `./llama.sh port <port>` | `p` | Change listening port (default: `8080`) |
-| `./llama.sh version` | `-v`, `--version` | Print script version |
+| `./llama.sh version` | `--version`, `-v` | Print script and detected `llama-server` versions |
 
 ---
 
