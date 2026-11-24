@@ -22,6 +22,7 @@ MODEL_ARGS=()
 MODEL_SUMMARY=""
 PID=""
 EDITOR_CMD=""
+MEMORY_WARNING=""
 
 # Lists with more entries than this ask for a filter first
 FILTER_THRESHOLD=10
@@ -1095,10 +1096,20 @@ get_available_ram_mb() {
 	fi
 
 	if [[ "$(uname -s)" == "Darwin" ]]; then
-		local total_bytes pressure_pct
+		local total_bytes pressure_pct avail_mb wired_limit_mb gpu_cap_mb
 		total_bytes=$(sysctl -n hw.memsize 2>/dev/null) || return 1
 		pressure_pct=$(get_memory_pressure_pct) || return 1
-		echo $(( (total_bytes * pressure_pct / 100 + used_by_llama_kb * 1024) / 1024 / 1024 ))
+		avail_mb=$(( (total_bytes * pressure_pct / 100 + used_by_llama_kb * 1024) / 1024 / 1024 ))
+
+		wired_limit_mb=$(sysctl -n iogpu.wired_limit_mb 2>/dev/null || echo 0)
+		if [[ "$wired_limit_mb" =~ ^[0-9]+$ ]] && (( wired_limit_mb > 0 )); then
+			gpu_cap_mb=$wired_limit_mb
+		else
+			# Default macOS Metal wired ceiling (~68% of unified RAM)
+			gpu_cap_mb=$(( (total_bytes / 1024 / 1024) * 68 / 100 ))
+		fi
+		(( avail_mb > gpu_cap_mb )) && avail_mb=$gpu_cap_mb
+		echo "$avail_mb"
 	elif [[ -r /proc/meminfo ]]; then
 		local avail_kb
 		avail_kb=$(awk '/^MemAvailable:/ { print $2; exit }' /proc/meminfo)
@@ -1131,6 +1142,8 @@ resolve_model_preset() {
 	local batch=1024
 	local ubatch=512
 	local fit_target=1536
+	local cache_k="q8_0"
+	local cache_v="q4_0"
 	local reasoning="off"
 	local extra=()
 	local sampling=()
@@ -1144,23 +1157,38 @@ resolve_model_preset() {
 		batch=2048
 		ubatch=512
 		fit_target=2048
+		cache_k="q8_0"
+		cache_v="q8_0"
+	elif (( headroom_mb >= 6000 )); then
+		ctx=20480
+		batch=1024
+		ubatch=512
+		fit_target=1536
+		cache_k="q8_0"
+		cache_v="q4_0"
 	elif (( headroom_mb >= 3000 )); then
 		ctx=20480
 		batch=1024
 		ubatch=512
 		fit_target=1536
+		cache_k="q4_0"
+		cache_v="q4_0"
 	elif (( headroom_mb >= 1200 )); then
 		ctx=14336
 		batch=512
 		ubatch=256
 		fit_target=1536
+		cache_k="q4_0"
+		cache_v="q4_0"
 	else
 		ctx=12288
 		batch=512
 		ubatch=256
 		fit_target=1024
+		cache_k="q4_0"
+		cache_v="q4_0"
 	fi
-
+	
 	# 2. Reasoning / Thinking models fine-tuning
 	case "$name" in
 		*Thinking*|*R1*|*QwQ*|*Ornith*)
@@ -1186,10 +1214,12 @@ resolve_model_preset() {
 			;;
 	esac
 
-	MODEL_SUMMARY="ctx: $ctx | batch: $batch/$ubatch | reasoning: $reasoning | RAM: ${avail_mb}/${total_mb}MB"
+	MODEL_SUMMARY="ctx: $ctx | kv: $cache_k/$cache_v | batch: $batch/$ubatch | reasoning: $reasoning | RAM: ${avail_mb}/${total_mb}MB"
 
 	MODEL_ARGS=(
 		--ctx-size "$ctx"
+		--cache-type-k "$cache_k"
+		--cache-type-v "$cache_v"
 		-b "$batch"
 		-ub "$ubatch"
 		--fit on
@@ -1199,6 +1229,12 @@ resolve_model_preset() {
 		"${extra[@]}"
 		"${sampling[@]}"
 	)
+
+	MEMORY_WARNING=""
+	
+	if (( avail_mb > 0 && avail_mb < model_mb + 1024 )); then
+		MEMORY_WARNING="Model (${model_mb}MB) exceeds safe available RAM (${avail_mb}MB); heavy swap likely."
+	fi
 }
 
 stop() {
@@ -1277,6 +1313,14 @@ start() {
 
 	resolve_model_preset
 	
+	if [[ -n "$MEMORY_WARNING" ]]; then
+		status_line "Warning" "⚠️ $MEMORY_WARNING"
+		if [[ -t 0 ]]; then
+			read -rp "Continue anyway? [y/N]: " ans
+			[[ "$ans" =~ ^[yY]$ ]] || return 1
+		fi
+	fi
+	
 	status_line "Starting" "🦙 llama-server ($MODEL_SUMMARY)..."
 
 	nohup llama-server \
@@ -1285,8 +1329,6 @@ start() {
 		--host 0.0.0.0 \
 		--port "$PORT" \
 		--parallel 1 \
-		--cache-type-k q8_0 \
-		--cache-type-v q4_0 \
 		--cache-reuse 256 \
 		--flash-attn on \
 		--jinja \
