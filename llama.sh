@@ -954,7 +954,7 @@ list_known_models() {
 			status_line "Known" "☁️  $name"
 		fi
 		comment=$(get_model_preview "$name")
-		[[ -n "$comment" ]] && printf '%19s %s\n' "" "ⓘ  $comment"
+		[[ -n "$comment" ]] && printf '%29s %s\n' "" "ⓘ  $comment"
 		echo ""
 	done
 }
