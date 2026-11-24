@@ -1181,6 +1181,9 @@ resolve_model_preset() {
 		*Ornith*)
 			(( headroom_mb >= 1024 && ctx < 24576 )) && ctx=24576
 			;;
+		*Inkling*)
+			extra+=(--load-mode none)
+			;;
 	esac
 
 	MODEL_SUMMARY="ctx: $ctx | batch: $batch/$ubatch | reasoning: $reasoning | RAM: ${avail_mb}/${total_mb}MB"
