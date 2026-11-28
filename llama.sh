@@ -1,6 +1,6 @@
 #!/bin/bash
 
-THIS_SCRIPT_VERSION="v1.3"
+THIS_SCRIPT_VERSION="v1.5"
 THIS_SCRIPT_SOURCE="${BASH_SOURCE[0]}"
 while [[ -L "$THIS_SCRIPT_SOURCE" ]]; do
 	DIR="$(cd -P "$(dirname "$THIS_SCRIPT_SOURCE")" && pwd)"
@@ -1148,7 +1148,7 @@ resolve_model_preset() {
 	local extra=()
 	local sampling=()
 	if ! has_gguf_sampling "$MODEL"; then
-		sampling=(--temp 0.35 --top-p 0.9 --min-p 0.05 --repeat-penalty 1.08 --repeat-last-n 128)
+		sampling=(--temp 0.2 --top-p 0.95 --min-p 0.05 --repeat-penalty 1.0)
 	fi
 
 	# 1. Dynamic sizing based on available RAM vs GGUF file weight
@@ -1171,12 +1171,19 @@ resolve_model_preset() {
 		batch=1024
 		ubatch=512
 		fit_target=1536
-		cache_k="q4_0"
+		cache_k="q8_0"
+		cache_v="q8_0"
+	elif (( headroom_mb >= 1500 )); then
+		ctx=16384
+		batch=1024
+		ubatch=512
+		fit_target=1536
+		cache_k="q8_0"
 		cache_v="q4_0"
 	elif (( headroom_mb >= 1200 )); then
 		ctx=14336
-		batch=512
-		ubatch=256
+		batch=1024
+		ubatch=512
 		fit_target=1536
 		cache_k="q4_0"
 		cache_v="q4_0"
@@ -1191,26 +1198,33 @@ resolve_model_preset() {
 	
 	# 2. Reasoning / Thinking models fine-tuning
 	case "$name" in
-		*Thinking*|*R1*|*QwQ*|*Ornith*)
+		*Thinking*|*DeepSeek-R1*|*QwQ*|*Ornith*)
 			reasoning="on"
-			extra+=(--reasoning-budget 2048)
-			(( headroom_mb < 3000 )) && extra+=(--no-reasoning-preserve)
+			extra+=(--reasoning-format deepseek)
+			if (( headroom_mb >= 3000 )); then
+				extra+=(--reasoning-budget 4096)
+			else
+				extra+=(--reasoning-budget 2048 --no-reasoning-preserve)
+			fi
 			;;
 	esac
 
 	# 3. Family-specific adjustments
 	case "$name" in
-		*Qwen3*)
-			sampling=(--temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.05 --repeat-penalty 1.05 --repeat-last-n 128)
+		*Qwen3.5*|*Qwen_Qwen3.5*)
+			sampling=(--temp 0.25 --top-p 0.9 --top-k 20 --min-p 0.05 --repeat-penalty 1.0)
 			;;
-		*Devstral*)
-			sampling=(--temp 0.15 --top-p 0.95 --min-p 0.01 --repeat-penalty 1.05 --repeat-last-n 128)
+		*Qwen3*)
+			sampling=(--temp 0.4 --top-p 0.95 --top-k 20 --min-p 0.05 --repeat-penalty 1.0)
+			;;
+		*Devstral*|*Ministral*)
+			sampling=(--temp 0.15 --top-p 0.95 --min-p 0.01 --repeat-penalty 1.0)
 			;;
 		*Ornith*)
 			(( headroom_mb >= 1024 && ctx < 24576 )) && ctx=24576
 			;;
 		*Inkling*)
-			extra+=(--load-mode none)
+			extra+=(--load-mode none  --no-reasoning-preserve)
 			;;
 	esac
 
@@ -1220,6 +1234,7 @@ resolve_model_preset() {
 		--ctx-size "$ctx"
 		--cache-type-k "$cache_k"
 		--cache-type-v "$cache_v"
+		--cache-reuse 256
 		-b "$batch"
 		-ub "$ubatch"
 		--fit on
@@ -1232,8 +1247,8 @@ resolve_model_preset() {
 
 	MEMORY_WARNING=""
 	
-	if (( avail_mb > 0 && avail_mb < model_mb + 1024 )); then
-		MEMORY_WARNING="Model (${model_mb}MB) exceeds safe available RAM (${avail_mb}MB); heavy swap likely."
+	if (( avail_mb > 0 && avail_mb < model_mb + 1800 )); then
+		MEMORY_WARNING="Model (${model_mb}MB) leaves too little headroom (${avail_mb}MB avail) for KV cache; swap likely."
 	fi
 }
 
@@ -1327,9 +1342,9 @@ start() {
 		--model "$MODEL" \
 		--alias localLLM \
 		--host 0.0.0.0 \
+		--cors-origins "http://localhost:*,http://127.0.0.1:*,http://192.168.*.*" \
 		--port "$PORT" \
 		--parallel 1 \
-		--cache-reuse 256 \
 		--flash-attn on \
 		--jinja \
 		"${MODEL_ARGS[@]}" \

@@ -1,4 +1,4 @@
-# 🦙 llama.sh  v1.4
+# 🦙 llama.sh  v1.5
 
 ## A Self-Contained Local AI Agent Ecosystem
 
